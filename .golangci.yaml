@@ -1,0 +1,60 @@
+run:
+  concurrency: 8
+  issues-exit-code: 1
+  tests: true
+
+linters-settings:
+  revive:
+    severity: error
+    confidence: 0.1
+    rules:
+      - name: comment-spacings
+        severity: warning
+        disabled: false
+        exclude: [ "" ]
+        arguments:
+          - mypragma
+          - otherpragma
+      - name: comments-density
+        severity: warning
+        disabled: false
+        exclude: [ "" ]
+        arguments: [ 20 ]
+      - name: exported
+        arguments:
+          - checkPrivateReceivers
+  depguard:
+    rules:
+      main:
+        list-mode: original
+        files:
+          - $all
+        allow:
+          - errors
+          - log
+          - fmt
+          - io
+          - runtime
+          - math
+          - strconv
+          - strings
+          - sync
+
+linters:
+  enable:
+    - depguard
+    - revive
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - revive
+
+issues:
+  exclude-files:
+    - fact_test.go
+    - app.go
+  exclude-use-default: true
+  max-issues-per-linter: 0
