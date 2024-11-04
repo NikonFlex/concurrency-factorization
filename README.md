@@ -5,11 +5,11 @@
 
 ```go
 var (
-// ErrFactorizationCancelled is returned when the factorization process is cancelled via the done channel.
+    // ErrFactorizationCancelled is returned when the factorization process is cancelled via the done channel.
     ErrFactorizationCancelled = errors.New("cancelled")
 
-// ErrWriterInteraction is returned if an error occurs while interacting with the writer
-// triggering early termination.
+    // ErrWriterInteraction is returned if an error occurs while interacting with the writer
+    // triggering early termination.
     ErrWriterInteraction = errors.New("writer interaction")
 )
 
@@ -48,10 +48,10 @@ type Factorization interface {
 
 #### Output:
 ```text
-line 1, 100 = 2 * 2 * 5 * 5
-line 2, -17 = -1 * 17
-line 3, 38 = 2 * 19
-line 4, 25 = 5 * 5
+100 = 2 * 2 * 5 * 5
+-17 = -1 * 17
+38 = 2 * 19
+25 = 5 * 5
 ```
 
 ## Особенности реализации
