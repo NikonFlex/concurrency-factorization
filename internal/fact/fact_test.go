@@ -365,6 +365,10 @@ type TestFactorizationCorrectness struct {
 	input        []int
 }
 
+func getDone() <-chan struct{} {
+	return make(chan struct{})
+}
+
 func (tc TestFactorizationCorrectness) Run(t *testing.T) {
 	factorization := New()
 
@@ -374,7 +378,7 @@ func (tc TestFactorizationCorrectness) Run(t *testing.T) {
 	}
 
 	writer := newWriter()
-	done := make(chan struct{})
+	done := getDone()
 	err := factorization.Do(done, tc.input, writer, cfg)
 	require.NoError(t, err)
 	scanner := bufio.NewScanner(strings.NewReader(writer.sb.String()))
