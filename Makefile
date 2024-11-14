@@ -23,7 +23,6 @@ install-deps:
 lint: install-deps
 	echo 'Running linter on files...'
 	$(GOLANGCI_BIN) run \
-	--new-from-rev=origin/main \
 	--config=.golangci.yaml \
 	--sort-results \
 	--max-issues-per-linter=0 \

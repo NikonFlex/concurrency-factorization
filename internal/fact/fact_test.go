@@ -208,6 +208,29 @@ func TestFallbackPerformance(t *testing.T) {
 	require.LessOrEqual(t, float64(second.NsPerOp())/float64(first.NsPerOp()), 1.4)
 }
 
+func TestNoGoroutineLeak(t *testing.T) {
+	done := make(chan struct{})
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		time.Sleep(time.Second * 1)
+		close(done)
+	}()
+
+	fact := New()
+	numbers := getNumbers(1_000_000)
+	config := Config{
+		FactorizationWorkers: 1000,
+		WriteWorkers:         1,
+	}
+
+	err := fact.Do(done, numbers, newSleepWriter(time.Millisecond), config)
+	require.Error(t, err)
+	require.LessOrEqual(t, runtime.NumGoroutine(), 3)
+}
+
 func TestGeneralPerformance(t *testing.T) {
 	first := testing.Benchmark(func(b *testing.B) {
 		done := make(chan struct{})
