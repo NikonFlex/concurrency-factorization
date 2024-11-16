@@ -126,7 +126,7 @@ func TestCancelInput(t *testing.T) {
 		writeWorkers: 1,
 		numbers:      []int{1},
 		doneSleep:    0,
-		beforeSleep:  time.Second,
+		beforeSleep:  3 * time.Second,
 		err:          ErrFactorizationCancelled,
 		writer:       newSleepWriter(time.Second * 5),
 	})
