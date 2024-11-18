@@ -70,7 +70,7 @@ func (f *factorizationImpl) Do(
 		return errors.New("config is unsupported")
 	}
 
-	errorCh := make(chan error, 10)             // Channel for capturing errors during execution.
+	errorCh := make(chan error)                 // Channel for capturing errors during execution.
 	numbersCh := generateNumbers(numbers, done) // Channel for feeding numbers to workers.
 
 	resultsCh := make(chan factorizedNumber) // Channel for passing factorization results.
