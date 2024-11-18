@@ -70,8 +70,8 @@ func (f *factorizationImpl) Do(
 		return errors.New("config is unsupported")
 	}
 
-	errorCh := make(chan error)                 // Channel for capturing errors during execution.
-	numbersCh := generateNumbers(numbers, done) // Channel for feeding numbers to workers.
+	errorCh := make(chan error, config[0].WriteWorkers) // Channel for capturing errors during execution.
+	numbersCh := generateNumbers(numbers, done)         // Channel for feeding numbers to workers.
 
 	resultsCh := make(chan factorizedNumber) // Channel for passing factorization results.
 	var wgFactorization sync.WaitGroup       // WaitGroup for factorization workers.
@@ -95,8 +95,6 @@ func (f *factorizationImpl) Do(
 					select {
 					case <-done:
 						return
-					case <-errorCh:
-						return
 					case resultsCh <- result: // Send result to results channel.
 					}
 				}
@@ -113,8 +111,6 @@ func (f *factorizationImpl) Do(
 			for {
 				select {
 				case <-done: // Exit if done signal is received.
-					return
-				case <-errorCh: // Exit if an error is encountered.
 					return
 				case result, ok := <-resultsCh: // Receive result to write.
 					if !ok {
