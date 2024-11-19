@@ -20,122 +20,79 @@ var (
 
 // Config defines the configuration for factorization and write workers.
 type Config struct {
-	FactorizationWorkers int // Number of workers for performing factorization.
+	FactorizationWorkers int // Number of workers for factorization.
 	WriteWorkers         int // Number of workers for writing results.
 }
 
 // Factorization interface represents a concurrent prime factorization task with configurable workers.
-// Thread safety and error handling are implemented as follows:
-// - The provided writer must be thread-safe to handle concurrent writes from multiple workers.
-// - Output uses '\n' for newlines.
-// - Factorization has a time complexity of O(sqrt(n)) per number.
-// - If an error occurs while writing to the writer, early termination is triggered across all workers.
+// The implementation is thread-safe and provides error handling as follows:
+// - The writer must be thread-safe to handle concurrent writes.
+// - Output uses '\n' for line breaks.
+// - Prime factorization has a time complexity of O(sqrt(n)) per number.
+// - Any write error triggers early termination across all workers.
 type Factorization interface {
-	// Do performs factorization on a list of integers, writing the results to an io.Writer.
+	// Do performs factorization on a list of integers and writes the results to an io.Writer.
 	// - done: a channel to signal early termination.
 	// - numbers: the list of integers to factorize.
-	// - writer: the io.Writer where factorization results are output.
-	// - config: optional worker configuration.
-	// Returns an error if the process is cancelled or if a writer error occurs.
+	// - writer: the io.Writer to output the results.
+	// - config: optional configuration for the workers.
+	// Returns an error if cancelled or if a write error occurs.
 	Do(done <-chan struct{}, numbers []int, writer io.Writer, config ...Config) error
 }
 
 // factorizedNumber represents the result of factorization for a single number.
 type factorizedNumber struct {
-	number  int   // The original number that was factorized.
+	number  int   // The original number.
 	factors []int // The prime factors of the number.
+}
+
+// executionContext bundles parameters for the execution flow.
+type executionContext struct {
+	done    <-chan struct{} // Channel to signal cancellation.
+	errorCh chan error      // Channel for reporting errors.
+	writer  io.Writer       // Writer for output.
+	config  Config          // Configuration for workers.
 }
 
 // factorizationImpl provides an implementation for the Factorization interface.
 type factorizationImpl struct{}
 
-// New creates a new instance of the factorizationImpl.
+// New creates a new instance of the factorization implementation.
 func New() *factorizationImpl {
 	return &factorizationImpl{}
 }
 
-// Do performs the concurrent factorization and result writing based on the given configuration.
+// Do performs concurrent factorization and writing based on the provided configuration.
 func (f *factorizationImpl) Do(
 	done <-chan struct{},
 	numbers []int,
 	writer io.Writer,
 	config ...Config,
 ) error {
-	// Set default configuration if none is provided.
-	if config == nil {
-		config = make([]Config, 1)
-		config[0] = Config{FactorizationWorkers: 1, WriteWorkers: 1}
-	}
-	if len(config) == 0 || config[0].FactorizationWorkers < 0 || config[0].WriteWorkers < 0 {
-		return errors.New("config is unsupported")
+	// Validate the configuration or apply defaults.
+	checkedConfig, err := checkConfig(config...)
+	if err != nil {
+		return err
 	}
 
-	errorCh := make(chan error, config[0].WriteWorkers) // Channel for capturing errors during execution.
-	numbersCh := generateNumbers(numbers, done)         // Channel for feeding numbers to workers.
+	errorCh := make(chan error, checkedConfig.WriteWorkers) // Channel to capture errors.
+	context := executionContext{done, errorCh, writer, checkedConfig}
 
-	resultsCh := make(chan factorizedNumber) // Channel for passing factorization results.
-	var wgFactorization sync.WaitGroup       // WaitGroup for factorization workers.
+	// Generate channels for processing.
+	wgGeneration := &sync.WaitGroup{}
+	numbersCh := generateNumbers(numbers, wgGeneration, context)
 
-	// Start factorization workers.
-	for i := 0; i < config[0].FactorizationWorkers; i++ {
-		wgFactorization.Add(1)
-		go func() {
-			defer wgFactorization.Done()
-			for {
-				select {
-				case <-done: // Exit if done signal is received.
-					return
-				case <-errorCh: // Exit if an error is encountered.
-					return
-				case num, ok := <-numbersCh: // Receive number for factorization.
-					if !ok {
-						return
-					}
-					result := factorize(num) // Perform factorization.
-					select {
-					case <-done:
-						return
-					case resultsCh <- result: // Send result to results channel.
-					}
-				}
-			}
-		}()
-	}
+	wgFactorization := &sync.WaitGroup{}
+	resultsCh := startFactorization(wgFactorization, numbersCh, context)
 
-	var wgWriting sync.WaitGroup // WaitGroup for writing workers.
-	// Start writing workers.
-	for i := 0; i < config[0].WriteWorkers; i++ {
-		wgWriting.Add(1)
-		go func() {
-			defer wgWriting.Done()
-			for {
-				select {
-				case <-done: // Exit if done signal is received.
-					return
-				case result, ok := <-resultsCh: // Receive result to write.
-					if !ok {
-						return
-					}
-
-					if err := writeResult(result, writer); err != nil {
-						select {
-						case <-done:
-							return
-						case errorCh <- ErrWriterInteraction: // Send writer error to error channel.
-							return
-						default:
-							return
-						}
-					}
-				}
-			}
-		}()
-	}
+	wgWriting := &sync.WaitGroup{}
+	startWriting(wgWriting, resultsCh, context)
 
 	// Wait for all workers to finish.
 	wgFactorization.Wait()
 	close(resultsCh)
 	wgWriting.Wait()
+	wgGeneration.Wait()
 
 	// Check for errors or cancellation signals.
 	select {
@@ -148,72 +105,148 @@ func (f *factorizationImpl) Do(
 	}
 }
 
-// generateNumbers creates a channel to stream numbers to workers.
-func generateNumbers(numbers []int, done <-chan struct{}) <-chan int {
-	numbersCh := make(chan int)
+// checkConfig validates and returns the configuration, applying defaults if necessary.
+func checkConfig(config ...Config) (Config, error) {
+	if config == nil {
+		config = make([]Config, 1)
+		return Config{FactorizationWorkers: 1, WriteWorkers: 1}, nil
+	}
+	if len(config) == 0 || config[0].FactorizationWorkers < 0 || config[0].WriteWorkers < 0 {
+		return Config{}, errors.New("invalid configuration")
+	}
+	return config[0], nil
+}
 
+// generateNumbers sends the input numbers to a channel for processing by workers.
+func generateNumbers(numbers []int, wg *sync.WaitGroup, context executionContext) <-chan int {
+	numbersCh := make(chan int)
+	wg.Add(1)
 	go func() {
 		defer close(numbersCh)
+		defer wg.Done()
 		for _, num := range numbers {
 			select {
-			case <-done: // Exit if done signal is received.
+			case <-context.done:
 				return
-			case numbersCh <- num: // Send number to channel.
+			case <-context.errorCh:
+				return
+			case numbersCh <- num: // Send number to the channel.
 			}
 		}
 	}()
-
 	return numbersCh
 }
 
-// factorize performs prime factorization on a single number.
+// startFactorization launches factorization workers to process numbers from the channel.
+func startFactorization(wg *sync.WaitGroup, numbersCh <-chan int, context executionContext) chan *factorizedNumber {
+	resultsCh := make(chan *factorizedNumber)
+	for i := 0; i < context.config.FactorizationWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-context.done:
+					return
+				case <-context.errorCh:
+					return
+				case num, ok := <-numbersCh:
+					if !ok {
+						return
+					}
+					result := factorize(num) // Perform factorization.
+					select {
+					case <-context.done:
+						return
+					case <-context.errorCh:
+						return
+					case resultsCh <- &result: // Send result to results channel.
+					}
+				}
+			}
+		}()
+	}
+	return resultsCh
+}
+
+// startWriting launches workers to write factorization results to the output writer.
+func startWriting(wg *sync.WaitGroup, resultsCh chan *factorizedNumber, context executionContext) {
+	for i := 0; i < context.config.WriteWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-context.done:
+					return
+				case <-context.errorCh:
+					return
+				case result, ok := <-resultsCh:
+					if !ok {
+						return
+					}
+					if err := writeResult(result, context.writer); err != nil {
+						select {
+						case <-context.done:
+							return
+						case context.errorCh <- errors.Join(ErrWriterInteraction, err):
+							return
+						}
+					}
+				}
+			}
+		}()
+	}
+}
+
+// factorize computes the prime factorization of a number.
 func factorize(n int) factorizedNumber {
 	result := factorizedNumber{number: n}
 
-	if n < 0 { // Handle negative numbers.
+	if n < 0 {
 		result.factors = append(result.factors, -1)
 		n = -n
 	}
 
-	if n == 0 { // Handle zero.
+	if n == 0 {
 		result.factors = append(result.factors, 0)
 		return result
 	}
 
-	if n == 1 { // Handle one.
+	if n == 1 {
 		result.factors = append(result.factors, 1)
 		return result
 	}
 
-	// Check divisors up to the square root of n.
-	for i := 2; i*i <= n; i++ {
-		for n%i == 0 { // Factor out i as long as it divides n.
+	for i := 2; i*i <= n || -i*i >= n; i++ {
+		for n%i == 0 {
 			result.factors = append(result.factors, i)
 			n /= i
 		}
 	}
 
-	if n > 1 { // If n is still greater than 1, it is a prime factor.
+	if n < 0 {
+		n = -n
+	}
+	if n > 1 {
 		result.factors = append(result.factors, n)
 	}
 
 	return result
 }
 
-// writeResult writes the factorized number to the writer.
-func writeResult(num factorizedNumber, writer io.Writer) error {
-	output := formatFactorizedNumber(num) + "\n" // Format output string.
-	_, err := writer.Write([]byte(output))       // Write to the provided writer.
+// writeResult writes a formatted factorized number to the output writer.
+func writeResult(num *factorizedNumber, writer io.Writer) error {
+	output := formatFactorizedNumber(num) + "\n"
+	_, err := writer.Write([]byte(output))
 	return err
 }
 
 // formatFactorizedNumber formats a factorized number as a string.
-func formatFactorizedNumber(num factorizedNumber) string {
+func formatFactorizedNumber(num *factorizedNumber) string {
 	factorStrings := make([]string, len(num.factors))
 	for i, factor := range num.factors {
-		factorStrings[i] = strconv.Itoa(factor) // Convert factors to strings.
+		factorStrings[i] = strconv.Itoa(factor)
 	}
-
-	// Join factors with '*' and format the final string.
 	return fmt.Sprintf("%d = %s", num.number, strings.Join(factorStrings, " * "))
 }
