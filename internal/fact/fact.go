@@ -189,7 +189,7 @@ func startWriting(wg *sync.WaitGroup, resultsCh chan *factorizedNumber, context 
 						case <-context.done:
 							return
 						case context.errorCh <- errors.Join(ErrWriterInteraction, err):
-							fmt.Println("error added")
+							fmt.Println("error added, error is: ", errors.Join(ErrWriterInteraction, err).Error())
 							return
 						}
 					}
