@@ -3,7 +3,6 @@ package fact
 import (
 	"bufio"
 	"errors"
-	"fmt"
 	"io"
 	"math"
 	"runtime"
@@ -33,7 +32,7 @@ type testCancel struct {
 	doneSleep    time.Duration
 	beforeSleep  time.Duration
 	writer       io.Writer
-	err          error
+	err          require.ErrorAssertionFunc
 }
 
 func runCancel(t *testing.T, tt *testCancel) {
@@ -59,8 +58,7 @@ func runCancel(t *testing.T, tt *testCancel) {
 	err := fact.Do(done, tt.numbers, tt.writer, config)
 	wg.Wait()
 
-	fmt.Println(err)
-	require.ErrorIs(t, tt.err, err)
+	tt.err(t, err)
 }
 
 func TestWorkersCount(t *testing.T) {
@@ -101,8 +99,27 @@ func TestMixedCancel(t *testing.T) {
 		numbers:      getNumbers(1_000_000),
 		doneSleep:    time.Millisecond * 100,
 		beforeSleep:  0,
-		err:          fmt.Errorf("%w %w", ErrFactorizationCancelled, ErrWriterInteraction),
-		writer:       newSleepErrorWriter(time.Millisecond*100, errors.New("123")),
+		err: func(t require.TestingT, err error, i ...interface{}) {
+			require.True(t, errors.Is(err, ErrWriterInteraction) || errors.Is(err, ErrFactorizationCancelled))
+		},
+		writer: newSleepErrorWriter(time.Millisecond*100, errors.New("123")),
+	})
+}
+
+var errWriteInternalFail = errors.New("writer internally failed")
+
+func TestWriterHasInternalErrorCancel(t *testing.T) {
+	runCancel(t, &testCancel{
+		name:         "input",
+		factWorkers:  100,
+		writeWorkers: 100000,
+		numbers:      getNumbers(10_000_000),
+		doneSleep:    -1,
+		beforeSleep:  0,
+		err: func(t require.TestingT, err error, i ...interface{}) {
+			require.ErrorIs(t, err, errWriteInternalFail)
+		},
+		writer: newSleepErrorWriter(time.Millisecond*100, errWriteInternalFail),
 	})
 }
 
@@ -114,8 +131,10 @@ func TestWriterErrorCancel(t *testing.T) {
 		numbers:      getNumbers(10_000_000),
 		doneSleep:    -1,
 		beforeSleep:  0,
-		err:          ErrWriterInteraction,
-		writer:       newSleepErrorWriter(time.Millisecond*100, errors.New("123")),
+		err: func(t require.TestingT, err error, i ...interface{}) {
+			require.ErrorIs(t, err, ErrWriterInteraction)
+		},
+		writer: newSleepErrorWriter(time.Millisecond*100, errors.New("123")),
 	})
 }
 
@@ -127,8 +146,10 @@ func TestCancelInput(t *testing.T) {
 		numbers:      []int{1},
 		doneSleep:    0,
 		beforeSleep:  3 * time.Second,
-		err:          ErrFactorizationCancelled,
-		writer:       newSleepWriter(time.Second * 5),
+		err: func(t require.TestingT, err error, i ...interface{}) {
+			require.ErrorIs(t, err, ErrFactorizationCancelled)
+		},
+		writer: newSleepWriter(time.Second * 5),
 	})
 }
 
@@ -139,8 +160,10 @@ func TestCancelLow(t *testing.T) {
 		writeWorkers: 1,
 		numbers:      getNumbers(10),
 		doneSleep:    time.Second * 3,
-		err:          ErrFactorizationCancelled,
-		writer:       newSleepWriter(time.Second * 5),
+		err: func(t require.TestingT, err error, i ...interface{}) {
+			require.ErrorIs(t, err, ErrFactorizationCancelled)
+		},
+		writer: newSleepWriter(time.Second * 5),
 	})
 }
 
@@ -421,6 +444,18 @@ func TestCorrectness(t *testing.T) {
 	TestFactorizationCorrectness{
 		factWorkers:  1,
 		writeWorkers: 1,
+		input:        []int{math.MinInt},
+	}.Run(t)
+
+	TestFactorizationCorrectness{
+		factWorkers:  1,
+		writeWorkers: 1,
+		input:        []int{math.MinInt + 1},
+	}.Run(t)
+
+	TestFactorizationCorrectness{
+		factWorkers:  1,
+		writeWorkers: 1,
 		input:        []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, math.MaxInt32 - 13},
 	}.Run(t)
 
@@ -601,7 +636,9 @@ func parseLine(t *testing.T, line string) (int, []int) {
 }
 
 func checkFactorization(num int, delimiters []int) bool {
-	if !sort.SliceIsSorted(delimiters, func(i, j int) bool { return delimiters[i] < delimiters[j] }) {
+	if !slices.IsSortedFunc(delimiters, func(i, j int) int {
+		return i - j
+	}) {
 		return false
 	}
 

@@ -42,10 +42,10 @@ update:
 		exit 1; \
 	fi
 	@current_branch=$$(git branch --show-current); \
-	echo $$current_branch
-	git checkout main
-	git pull
-	@for branch in $$(git branch | sed 's/^[* ]*//'); do \
+	echo "Current branch: $$current_branch"; \
+	git checkout main; \
+	git pull; \
+	for branch in $$(git branch | sed 's/^[* ]*//'); do \
 		git checkout $$branch; \
 		if ! git rev-parse --symbolic-full-name @{u} >/dev/null 2>&1; then \
 			branch_exists=$$(git ls-remote --heads origin $$branch); \
@@ -62,6 +62,6 @@ update:
 		git push -f; \
 		git rebase main; \
 		git push -f; \
-	done
-	git checkout $$current_branch
-	@echo 'Successfully updated'
+	done; \
+	git checkout $$current_branch; \
+	echo 'Successfully updated'
