@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"math"
+	"math/rand/v2"
 	"runtime"
 	"slices"
 	"sort"
@@ -106,9 +107,9 @@ func TestMixedCancel(t *testing.T) {
 	})
 }
 
-var errWriteInternalFail = errors.New("writer internally failed")
-
 func TestWriterHasInternalErrorCancel(t *testing.T) {
+	var errWriteInternalFail = errors.New("writer internally failed" + strconv.FormatInt(rand.N[int64](10e9), 10))
+
 	runCancel(t, &testCancel{
 		name:         "input",
 		factWorkers:  100,
@@ -644,8 +645,47 @@ func checkFactorization(num int, delimiters []int) bool {
 
 	got := 1
 	for _, d := range delimiters {
+		if !pChecker.IsPrime(int(math.Abs(float64(d)))) {
+			return false
+		}
+
 		got *= d
 	}
 
 	return num == got
+}
+
+var pChecker = newPrimeChecker()
+
+type primeChecker struct {
+	memo map[int]bool
+}
+
+func newPrimeChecker() *primeChecker {
+	return &primeChecker{
+		memo: make(map[int]bool),
+	}
+}
+
+func (pc *primeChecker) IsPrime(n int) bool {
+	if n == 1 || n == 2 {
+		return true
+	}
+
+	if result, exists := pc.memo[n]; exists {
+		return result
+	}
+
+	sqrtN := int(math.Sqrt(float64(n)))
+	isPrime := true
+	for i := 2; i <= sqrtN; i++ {
+		if n%i == 0 {
+			isPrime = false
+			break
+		}
+	}
+
+	pc.memo[n] = isPrime
+
+	return isPrime
 }
