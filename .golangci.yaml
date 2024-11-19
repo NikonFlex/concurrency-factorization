@@ -39,6 +39,9 @@ linters-settings:
           - strconv
           - strings
           - sync
+        deny:
+          - pkg: sync/atomic
+            desc: not allowed
 
 linters:
   enable:
