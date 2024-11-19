@@ -75,7 +75,7 @@ func (f *factorizationImpl) Do(
 		return err
 	}
 
-	errorCh := make(chan error, checkedConfig.WriteWorkers) // Channel to capture errors.
+	errorCh := make(chan error, checkedConfig.FactorizationWorkers+checkedConfig.WriteWorkers) // Channel to capture errors.
 	context := executionContext{done, errorCh, writer, checkedConfig}
 
 	// Generate channels for processing.
