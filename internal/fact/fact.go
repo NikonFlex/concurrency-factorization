@@ -108,7 +108,6 @@ func (f *factorizationImpl) Do(
 // checkConfig validates and returns the configuration, applying defaults if necessary.
 func checkConfig(config ...Config) (Config, error) {
 	if config == nil {
-		config = make([]Config, 1)
 		return Config{FactorizationWorkers: 1, WriteWorkers: 1}, nil
 	}
 	if len(config) == 0 || config[0].FactorizationWorkers < 0 || config[0].WriteWorkers < 0 {
