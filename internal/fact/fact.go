@@ -218,6 +218,7 @@ func factorize(n int) factorizedNumber {
 		return result
 	}
 
+	// factorizing in O(sqrt)
 	for i := 2; i*i <= n || -i*i >= n; i++ {
 		for n%i == 0 {
 			result.factors = append(result.factors, i)
