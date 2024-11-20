@@ -112,7 +112,6 @@ func (f *factorizationImpl) Do(
 	// Check for errors or cancellation signals.
 	select {
 	case <-errorCh:
-		fmt.Println("error found, err:", context.err)
 		return context.GetError()
 	case <-done:
 		return ErrFactorizationCancelled
@@ -210,11 +209,8 @@ func startWriting(wg *sync.WaitGroup, resultsCh chan *factorizedNumber, context 
 }
 
 func onErrorHappened(err error, context *executionContext) {
-	fmt.Println("start write error")
 	close(context.errorCh)
 	context.SetError(errors.Join(ErrWriterInteraction, err))
-	fmt.Println("finish write error,", context.err.Error())
-
 }
 
 // factorize computes the prime factorization of a number.
