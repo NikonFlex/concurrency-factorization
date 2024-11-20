@@ -53,22 +53,6 @@ type executionContext struct {
 	writer  io.Writer       // Writer for output.
 	config  Config          // Configuration for workers.
 	err     error
-	mu      sync.Mutex
-}
-
-func (ctx *executionContext) SetError(err error) {
-	ctx.mu.Lock()
-	defer ctx.mu.Unlock()
-	if ctx.err == nil {
-		ctx.err = err
-	}
-}
-
-// GetError retrieves the current error safely.
-func (ctx *executionContext) GetError() error {
-	ctx.mu.Lock()
-	defer ctx.mu.Unlock()
-	return ctx.err
 }
 
 // factorizationImpl provides an implementation for the Factorization interface.
@@ -93,7 +77,7 @@ func (f *factorizationImpl) Do(
 	}
 
 	errorCh := make(chan error, checkedConfig.WriteWorkers) // Channel to capture errors.
-	context := &executionContext{done, errorCh, writer, checkedConfig, nil, sync.Mutex{}}
+	context := &executionContext{done, errorCh, writer, checkedConfig, nil}
 	numbersCh := make(chan int)
 
 	wgFactorization := &sync.WaitGroup{}
@@ -112,7 +96,7 @@ func (f *factorizationImpl) Do(
 	// Check for errors or cancellation signals.
 	select {
 	case <-errorCh:
-		return context.GetError()
+		return context.err
 	case <-done:
 		return ErrFactorizationCancelled
 	default:
@@ -210,7 +194,7 @@ func startWriting(wg *sync.WaitGroup, resultsCh chan *factorizedNumber, context 
 
 func onErrorHappened(err error, context *executionContext) {
 	close(context.errorCh)
-	context.SetError(errors.Join(ErrWriterInteraction, err))
+	context.err = errors.Join(ErrWriterInteraction, err)
 }
 
 // factorize computes the prime factorization of a number.
