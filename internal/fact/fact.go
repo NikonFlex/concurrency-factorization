@@ -77,10 +77,7 @@ func (f *factorizationImpl) Do(
 
 	errorCh := make(chan error, checkedConfig.WriteWorkers) // Channel to capture errors.
 	context := executionContext{done, errorCh, writer, checkedConfig}
-
-	// Generate channels for processing.
-	wgGeneration := &sync.WaitGroup{}
-	numbersCh := generateNumbers(numbers, wgGeneration, context)
+	numbersCh := make(chan int)
 
 	wgFactorization := &sync.WaitGroup{}
 	resultsCh := startFactorization(wgFactorization, numbersCh, context)
@@ -88,11 +85,12 @@ func (f *factorizationImpl) Do(
 	wgWriting := &sync.WaitGroup{}
 	startWriting(wgWriting, resultsCh, context)
 
+	generateNumbers(numbers, numbersCh, context)
+
 	// Wait for all workers to finish.
 	wgFactorization.Wait()
 	close(resultsCh)
 	wgWriting.Wait()
-	wgGeneration.Wait()
 
 	// Check for errors or cancellation signals.
 	select {
@@ -117,23 +115,17 @@ func checkConfig(config ...Config) (Config, error) {
 }
 
 // generateNumbers sends the input numbers to a channel for processing by workers.
-func generateNumbers(numbers []int, wg *sync.WaitGroup, context executionContext) <-chan int {
-	numbersCh := make(chan int)
-	wg.Add(1)
-	go func() {
-		defer close(numbersCh)
-		defer wg.Done()
-		for _, num := range numbers {
-			select {
-			case <-context.done:
-				return
-			case <-context.errorCh:
-				return
-			case numbersCh <- num: // Send number to the channel.
-			}
+func generateNumbers(numbers []int, numberCh chan int, context executionContext) {
+	defer close(numberCh)
+	for _, num := range numbers {
+		select {
+		case <-context.done:
+			return
+		case <-context.errorCh:
+			return
+		case numberCh <- num: // Send number to the channel.
 		}
-	}()
-	return numbersCh
+	}
 }
 
 // startFactorization launches factorization workers to process numbers from the channel.
