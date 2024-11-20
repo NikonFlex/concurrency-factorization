@@ -52,6 +52,23 @@ type executionContext struct {
 	errorCh chan error      // Channel for reporting errors.
 	writer  io.Writer       // Writer for output.
 	config  Config          // Configuration for workers.
+	err     error
+	mu      sync.Mutex
+}
+
+func (ctx *executionContext) SetError(err error) {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	if ctx.err == nil {
+		ctx.err = err
+	}
+}
+
+// GetError retrieves the current error safely.
+func (ctx *executionContext) GetError() error {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	return ctx.err
 }
 
 // factorizationImpl provides an implementation for the Factorization interface.
@@ -76,7 +93,7 @@ func (f *factorizationImpl) Do(
 	}
 
 	errorCh := make(chan error, checkedConfig.WriteWorkers) // Channel to capture errors.
-	context := executionContext{done, errorCh, writer, checkedConfig}
+	context := &executionContext{done, errorCh, writer, checkedConfig, nil, sync.Mutex{}}
 	numbersCh := make(chan int)
 
 	wgFactorization := &sync.WaitGroup{}
@@ -94,8 +111,9 @@ func (f *factorizationImpl) Do(
 
 	// Check for errors or cancellation signals.
 	select {
-	case err := <-errorCh:
-		return err
+	case <-errorCh:
+		fmt.Println("error found, err:", context.err)
+		return context.GetError()
 	case <-done:
 		return ErrFactorizationCancelled
 	default:
@@ -115,7 +133,7 @@ func checkConfig(config ...Config) (Config, error) {
 }
 
 // generateNumbers sends the input numbers to a channel for processing by workers.
-func generateNumbers(numbers []int, numberCh chan int, context executionContext) {
+func generateNumbers(numbers []int, numberCh chan int, context *executionContext) {
 	defer close(numberCh)
 	for _, num := range numbers {
 		select {
@@ -129,7 +147,7 @@ func generateNumbers(numbers []int, numberCh chan int, context executionContext)
 }
 
 // startFactorization launches factorization workers to process numbers from the channel.
-func startFactorization(wg *sync.WaitGroup, numbersCh <-chan int, context executionContext) chan *factorizedNumber {
+func startFactorization(wg *sync.WaitGroup, numbersCh <-chan int, context *executionContext) chan *factorizedNumber {
 	resultsCh := make(chan *factorizedNumber)
 	for i := 0; i < context.config.FactorizationWorkers; i++ {
 		wg.Add(1)
@@ -161,7 +179,8 @@ func startFactorization(wg *sync.WaitGroup, numbersCh <-chan int, context execut
 }
 
 // startWriting launches workers to write factorization results to the output writer.
-func startWriting(wg *sync.WaitGroup, resultsCh chan *factorizedNumber, context executionContext) {
+func startWriting(wg *sync.WaitGroup, resultsCh chan *factorizedNumber, context *executionContext) {
+	var once sync.Once
 	for i := 0; i < context.config.WriteWorkers; i++ {
 		wg.Add(1)
 		go func() {
@@ -169,6 +188,8 @@ func startWriting(wg *sync.WaitGroup, resultsCh chan *factorizedNumber, context 
 			for {
 				select {
 				case <-context.done:
+					return
+				case <-context.errorCh:
 					return
 				case result, ok := <-resultsCh:
 					if !ok {
@@ -178,14 +199,22 @@ func startWriting(wg *sync.WaitGroup, resultsCh chan *factorizedNumber, context 
 						select {
 						case <-context.done:
 							return
-						case context.errorCh <- errors.Join(ErrWriterInteraction, err):
-							return
+						default:
+							once.Do(func() { onErrorHappened(err, context) })
 						}
 					}
 				}
 			}
 		}()
 	}
+}
+
+func onErrorHappened(err error, context *executionContext) {
+	fmt.Println("start write error")
+	close(context.errorCh)
+	context.SetError(errors.Join(ErrWriterInteraction, err))
+	fmt.Println("finish write error,", context.err.Error())
+
 }
 
 // factorize computes the prime factorization of a number.
