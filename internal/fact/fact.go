@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -106,10 +107,10 @@ func (f *factorizationImpl) Do(
 
 // checkConfig validates and returns the configuration, applying defaults if necessary.
 func checkConfig(config ...Config) (Config, error) {
-	if config == nil {
+	if config == nil || len(config) == 0 {
 		return Config{FactorizationWorkers: 1, WriteWorkers: 1}, nil
 	}
-	if len(config) == 0 || config[0].FactorizationWorkers < 0 || config[0].WriteWorkers < 0 {
+	if config[0].FactorizationWorkers < 0 || config[0].WriteWorkers < 0 {
 		return Config{}, errors.New("invalid configuration")
 	}
 	return config[0], nil
@@ -201,32 +202,29 @@ func onErrorHappened(err error, context *executionContext) {
 func factorize(n int) factorizedNumber {
 	result := factorizedNumber{number: n}
 
+	if n == math.MinInt {
+		result.factors = append(result.factors, -1)
+		result.factors = append(result.factors, 2)
+		n = -(n / 2)
+	}
 	if n < 0 {
 		result.factors = append(result.factors, -1)
 		n = -n
 	}
 
-	if n == 0 {
-		result.factors = append(result.factors, 0)
-		return result
-	}
-
-	if n == 1 {
-		result.factors = append(result.factors, 1)
+	if n == 0 || n == 1 {
+		result.factors = append(result.factors, n)
 		return result
 	}
 
 	// factorizing in O(sqrt)
-	for i := 2; i*i <= n || -i*i >= n; i++ {
+	for i := 2; i*i <= n; i++ {
 		for n%i == 0 {
 			result.factors = append(result.factors, i)
 			n /= i
 		}
 	}
 
-	if n < 0 {
-		n = -n
-	}
 	if n > 1 {
 		result.factors = append(result.factors, n)
 	}
@@ -236,16 +234,10 @@ func factorize(n int) factorizedNumber {
 
 // writeResult writes a formatted factorized number to the output writer.
 func writeResult(num *factorizedNumber, writer io.Writer) error {
-	output := formatFactorizedNumber(num) + "\n"
-	_, err := writer.Write([]byte(output))
-	return err
-}
-
-// formatFactorizedNumber formats a factorized number as a string.
-func formatFactorizedNumber(num *factorizedNumber) string {
 	factorStrings := make([]string, len(num.factors))
 	for i, factor := range num.factors {
 		factorStrings[i] = strconv.Itoa(factor)
 	}
-	return fmt.Sprintf("%d = %s", num.number, strings.Join(factorStrings, " * "))
+	_, err := fmt.Fprintf(writer, "%d = %s\n", num.number, strings.Join(factorStrings, " * "))
+	return err
 }
